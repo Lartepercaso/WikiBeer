@@ -1,12 +1,16 @@
 
+
 import React from 'react';
-import { BreweryPost } from '../types';
-import { ShareIcon, StarIcon, DirectionsIcon, CommentIcon } from '../constants';
+import { BreweryPost, User } from '../types';
+import { ShareIcon, StarIcon, DirectionsIcon, CommentIcon, TrashIcon } from '../constants';
 
 interface BreweryCardProps {
   post: BreweryPost;
+  user: User | null;
+  isAdmin: boolean;
   onDetailsClick: (post: BreweryPost) => void;
   onShareClick: (post: BreweryPost, event: React.MouseEvent) => void;
+  onDelete: (postId: number, view: 'beers' | 'breweries', imageUrl: string) => void;
 }
 
 const StarRating: React.FC<{ rating: number }> = ({ rating }) => {
@@ -22,15 +26,31 @@ const StarRating: React.FC<{ rating: number }> = ({ rating }) => {
   );
 };
 
-const BreweryCard: React.FC<BreweryCardProps> = ({ post, onDetailsClick, onShareClick }) => {
+const BreweryCard: React.FC<BreweryCardProps> = ({ post, user, isAdmin, onDetailsClick, onShareClick, onDelete }) => {
   const averageRating = post.ratings.length > 0
     ? post.ratings.reduce((acc, r) => acc + r.value, 0) / post.ratings.length
     : 0;
     
   const directionsUrl = `https://www.openstreetmap.org/directions?from=&to=${post.lat},${post.lng}`;
+  
+  const handleDelete = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(window.confirm(`Sei sicuro di voler eliminare "${post.name}"? L'azione è irreversibile.`)) {
+          onDelete(post.id, 'breweries', post.imageUrl);
+      }
+  };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg overflow-hidden transform hover:-translate-y-1 transition-all duration-300 flex flex-col">
+    <div className="bg-white rounded-lg shadow-lg overflow-hidden transform hover:-translate-y-1 transition-all duration-300 flex flex-col relative">
+       {isAdmin && (
+        <button 
+          onClick={handleDelete}
+          className="absolute top-2 right-2 bg-red-600/80 text-white p-1.5 rounded-full hover:bg-red-700 transition z-10" 
+          aria-label="Elimina post"
+        >
+            <TrashIcon className="w-4 h-4" />
+        </button>
+      )}
       <img src={post.imageUrl} alt={post.name} className="w-full h-64 object-cover" />
       <div className="p-4 flex flex-col flex-grow">
         <div className="flex justify-between items-start">

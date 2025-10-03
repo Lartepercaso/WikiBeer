@@ -16,9 +16,12 @@ import SearchBar from './components/SearchBar';
 import AuthModal from './components/AuthModal';
 import LandingPage from './components/LandingPage';
 import MapComponent from './components/MapComponent';
+import UserProfileModal from './components/UserProfileModal';
 
 type View = 'beers' | 'breweries';
 type Notification = { message: string; type: 'success' | 'error' };
+
+const ADMIN_EMAIL = 'admin@wikibeer.com';
 
 const App: React.FC = () => {
     const [beers, setBeers] = useState<BeerPost[]>([]);
@@ -37,6 +40,7 @@ const App: React.FC = () => {
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
     const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
     const [isGuestWelcomeOpen, setIsGuestWelcomeOpen] = useState(false);
+    const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
     
     // Search and Filter States
     const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -50,6 +54,8 @@ const App: React.FC = () => {
 
     // Map state
     const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+    const isAdmin = useMemo(() => user?.email === ADMIN_EMAIL, [user]);
 
     const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
         setNotification({ message, type });
@@ -139,6 +145,7 @@ const App: React.FC = () => {
     const handleLogout = useCallback(async () => {
         await supabase.auth.signOut();
         setUser(null);
+        setIsUserProfileModalOpen(false);
         showNotification('Logout effettuato.', 'success');
     }, []);
 
@@ -249,6 +256,50 @@ const App: React.FC = () => {
         }
     }, [user]);
     
+    const handleDeletePost = useCallback(async (postId: number, postView: 'beers' | 'breweries', imageUrl: string) => {
+        // Find the post to check ownership
+        const post = postView === 'beers' ? beers.find(b => b.id === postId) : breweries.find(b => b.id === postId);
+        
+        if (!user || (!isAdmin && user.id !== post?.user_id)) {
+            showNotification("Non hai i permessi per eliminare questo post.", "error");
+            return;
+        }
+
+        // 1. Delete Image from Storage
+        try {
+            const urlParts = imageUrl.split('/');
+            const filePath = urlParts.slice(urlParts.indexOf('posts-images') + 1).join('/');
+            
+            if (filePath) {
+                const { error: storageError } = await supabase.storage.from('posts-images').remove([filePath]);
+                if (storageError) {
+                    // Log error but proceed to delete DB record, as it might be an old/invalid link
+                    console.error("Could not delete image, maybe it was already removed:", storageError.message);
+                }
+            }
+        } catch (e) {
+            console.error("Error parsing image URL for deletion:", e);
+        }
+
+        // 2. Delete Post from Database
+        const { error: dbError } = await supabase.from(postView).delete().match({ id: postId });
+        if (dbError) {
+            return showNotification(`Errore durante l'eliminazione: ${dbError.message}`, 'error');
+        }
+
+        // 3. Update local state
+        if (postView === 'beers') {
+            setBeers(current => current.filter(p => p.id !== postId));
+            setSelectedBeer(null);
+        } else {
+            setBreweries(current => current.filter(p => p.id !== postId));
+            setSelectedBrewery(null);
+        }
+        
+        setIsUserProfileModalOpen(false);
+        showNotification('Post eliminato con successo.', 'success');
+    }, [user, isAdmin, beers, breweries]);
+
     const handleShareClick = (post: BeerPost | BreweryPost, event: React.MouseEvent) => {
         event.stopPropagation();
         const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -293,6 +344,7 @@ const App: React.FC = () => {
                 onNewBeerClick={() => user ? setIsNewBeerModalOpen(true) : setIsAuthModalOpen(true)}
                 onNewBreweryClick={() => user ? setIsNewBreweryModalOpen(true) : setIsAuthModalOpen(true)}
                 onLogoutClick={handleLogout}
+                onProfileClick={() => setIsUserProfileModalOpen(true)}
                 onViewChange={setView}
                 isLoggedIn={!!user}
                 view={view}
@@ -318,9 +370,9 @@ const App: React.FC = () => {
                         {view === 'breweries' && <MapComponent userLocation={userLocation} breweries={filteredBreweries} />}
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mt-6">
                             {view === 'beers' ? (
-                                filteredBeers.map(post => <BeerCard key={post.id} post={post} onDetailsClick={setSelectedBeer} onShareClick={handleShareClick} />)
+                                filteredBeers.map(post => <BeerCard key={post.id} post={post} user={user} isAdmin={isAdmin} onDetailsClick={setSelectedBeer} onShareClick={handleShareClick} onDelete={handleDeletePost} />)
                             ) : (
-                                filteredBreweries.map(post => <BreweryCard key={post.id} post={post} onDetailsClick={setSelectedBrewery} onShareClick={handleShareClick} />)
+                                filteredBreweries.map(post => <BreweryCard key={post.id} post={post} user={user} isAdmin={isAdmin} onDetailsClick={setSelectedBrewery} onShareClick={handleShareClick} onDelete={handleDeletePost} />)
                             )}
                         </div>
                     </>
@@ -329,14 +381,22 @@ const App: React.FC = () => {
             
             <SharePopover />
             
-            <DetailsModal post={selectedBeer} user={user} onClose={() => setSelectedBeer(null)} onAddComment={(id, text) => handleAddComment(id, text, 'beers')} onRate={(id, val) => handleRate(id, val, 'beers')} onShareClick={handleShareClick} />
-            <BreweryDetailsModal post={selectedBrewery} user={user} onClose={() => setSelectedBrewery(null)} onAddComment={(id, text) => handleAddComment(id, text, 'breweries')} onRate={(id, val) => handleRate(id, val, 'breweries')} onShareClick={handleShareClick} />
+            <DetailsModal post={selectedBeer} user={user} isAdmin={isAdmin} onClose={() => setSelectedBeer(null)} onAddComment={(id, text) => handleAddComment(id, text, 'beers')} onRate={(id, val) => handleRate(id, val, 'beers')} onShareClick={handleShareClick} onDelete={handleDeletePost} />
+            <BreweryDetailsModal post={selectedBrewery} user={user} isAdmin={isAdmin} onClose={() => setSelectedBrewery(null)} onAddComment={(id, text) => handleAddComment(id, text, 'breweries')} onRate={(id, val) => handleRate(id, val, 'breweries')} onShareClick={handleShareClick} onDelete={handleDeletePost} />
             
             {isNewBeerModalOpen && <Modal isOpen={isNewBeerModalOpen} onClose={() => setIsNewBeerModalOpen(false)} title="Aggiungi una nuova birra"><NewPostModal onClose={() => setIsNewBeerModalOpen(false)} onAddPost={handleAddBeer} /></Modal>}
             {isNewBreweryModalOpen && <Modal isOpen={isNewBreweryModalOpen} onClose={() => setIsNewBreweryModalOpen(false)} title="Aggiungi una nuova birreria"><NewBreweryModal onClose={() => setIsNewBreweryModalOpen(false)} onAddBrewery={handleAddBrewery} /></Modal>}
             {isAuthModalOpen && <AuthModal onClose={() => setIsAuthModalOpen(false)} onLogin={handleLogin} onSignUp={handleSignUp} />}
             {isHelpModalOpen && <Modal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} title="Aiuto"><p>Benvenuto in WiKiBeer & Brewery! Qui puoi trovare e recensire birre e birrerie. Usa la ricerca per filtrare i risultati. Fai il login per aggiungere nuovi post, commentare e votare.</p></Modal>}
             {isPolicyModalOpen && <Modal isOpen={isPolicyModalOpen} onClose={() => setIsPolicyModalOpen(false)} title="Policy"><p>La nostra policy è semplice: rispetta gli altri utenti, non inserire contenuti inappropriati e bevi responsabilmente. Tutte le informazioni inserite sono condivise con la community.</p></Modal>}
+            {isUserProfileModalOpen && user && <UserProfileModal 
+                user={user}
+                userBeers={beers.filter(b => b.user_id === user.id)}
+                userBreweries={breweries.filter(b => b.user_id === user.id)}
+                onClose={() => setIsUserProfileModalOpen(false)}
+                onLogout={handleLogout}
+                onDeletePost={handleDeletePost}
+            />}
             {isGuestWelcomeOpen && (
                 <Modal isOpen={isGuestWelcomeOpen} onClose={() => setIsGuestWelcomeOpen(false)} title="Benvenuto Ospite!">
                     <div className="text-center space-y-4">

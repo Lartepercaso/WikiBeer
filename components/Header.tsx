@@ -1,5 +1,5 @@
 import React from 'react';
-import { SearchIcon, HelpIcon, LanguageIcon, BeerIcon, BreweryIcon } from '../constants';
+import { SearchIcon, HelpIcon, LanguageIcon, BeerIcon, BreweryIcon, UserIcon } from '../constants';
 
 type View = 'beers' | 'breweries';
 
@@ -12,6 +12,7 @@ interface HeaderProps {
   onNewBeerClick: () => void;
   onNewBreweryClick: () => void;
   onLogoutClick: () => void;
+  onProfileClick: () => void;
   onViewChange: (view: 'beers' | 'breweries') => void;
   isLoggedIn: boolean;
   view: View;
@@ -28,6 +29,7 @@ const Header: React.FC<HeaderProps> = ({
   onNewBeerClick,
   onNewBreweryClick,
   onLogoutClick,
+  onProfileClick,
   onViewChange,
   isLoggedIn,
   view,
@@ -76,6 +78,9 @@ const Header: React.FC<HeaderProps> = ({
               </button>
                <button onClick={onNewBreweryClick} className="bg-amber-500 text-amber-900 font-bold px-3 py-2 text-sm rounded-md hover:bg-amber-400 transition-transform hover:scale-105 whitespace-nowrap">
                 +<span className="hidden sm:inline">la Tua </span>Birreria
+              </button>
+              <button onClick={onProfileClick} className="p-2 rounded-full hover:bg-amber-700 transition-colors" aria-label="Profilo Utente">
+                <UserIcon className="w-6 h-6" />
               </button>
               <button onClick={onLogoutClick} className="text-sm px-3 py-2 rounded-md hover:bg-amber-700 transition-colors">
                 LOGOUT
