@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 import { BreweryPost, User } from '../types';
 import { ShareIcon, StarIcon, DirectionsIcon, CommentIcon, TrashIcon } from '../constants';
