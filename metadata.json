@@ -1,0 +1,7 @@
+{
+  "name": "WiKiBeer & Brewery - Piattaforma Social",
+  "description": "Una piattaforma social per recensire birre e birrerie.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
