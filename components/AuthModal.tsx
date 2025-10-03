@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import Modal from './Modal';
 
@@ -12,16 +11,16 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onSignUp }) => 
   const [isLoginView, setIsLoginView] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError('Per favore, inserisci email e password.');
+    if (!email || password.length < 6) {
+      setFormError('Per favore, inserisci un\'email valida e una password di almeno 6 caratteri.');
       return;
     }
-    setError('');
+    setFormError('');
     setIsSubmitting(true);
     
     try {
@@ -30,9 +29,11 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onSignUp }) => 
       } else {
         await onSignUp(email, password);
       }
-      // On success, the parent component will close the modal
+      // On success, the parent component (`App.tsx`) handles closing the modal and showing notifications.
     } catch (err: any) {
-        setError(err.message || 'Si è verificato un errore.');
+        // The parent component (`App.tsx`) will now show the detailed error notification.
+        // We can still set a generic form error if we want.
+        console.error("Auth error:", err);
     } finally {
         setIsSubmitting(false);
     }
@@ -66,7 +67,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLogin, onSignUp }) => 
             disabled={isSubmitting}
           />
         </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {formError && <p className="text-sm text-red-600">{formError}</p>}
         <button type="submit" disabled={isSubmitting} className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-amber-800 hover:bg-amber-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:bg-amber-400">
           {isSubmitting ? 'Attendere...' : (isLoginView ? 'Accedi' : 'Registrati')}
         </button>

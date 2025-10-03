@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { BeerPost, BreweryPost, Comment, Rating } from './types';
 import { supabase } from './services/supabaseClient';
-import { User as SupabaseUser } from '@supabase/supabase-js';
+import { User as SupabaseUser, AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { MOCK_BEERS, MOCK_BREWERIES } from './mockData';
 
 import Header from './components/Header';
@@ -57,55 +57,61 @@ const App: React.FC = () => {
 
     const isAdmin = useMemo(() => user?.email === ADMIN_EMAIL, [user]);
 
-    const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    const showNotification = useCallback((message: string, type: 'success' | 'error' = 'success') => {
         setNotification({ message, type });
         setTimeout(() => setNotification(null), 4000);
-    };
+    }, []);
 
-    // --- AUTH & DATA FETCHING ---
+    // --- REWRITTEN DATA FETCHING LOGIC ---
+    const fetchData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const { data: beersData, error: beersError } = await supabase.from('beers').select('*, ratings(*), comments(*)');
+            if (beersError) throw new Error(`Errore birre: ${beersError.message}`);
+            
+            setBeers((beersData as any) || []);
+
+            const { data: breweriesData, error: breweriesError } = await supabase.from('breweries').select('*, ratings(*), comments(*)');
+            if (breweriesError) throw new Error(`Errore birrerie: ${breweriesError.message}`);
+
+            setBreweries((breweriesData as any) || []);
+
+        } catch (error: any) {
+            console.error('Error fetching data:', error.message);
+            showNotification(`Errore nel caricamento dei dati: ${error.message}. Carico dati di test.`, "error");
+            // Fallback to mock data on fetch failure
+            setBeers(MOCK_BEERS);
+            setBreweries(MOCK_BREWERIES);
+        } finally {
+            setLoading(false);
+        }
+    }, [showNotification]);
+
+
+    // --- REWRITTEN AUTHENTICATION HANDLING ---
     useEffect(() => {
-        const fetchInitialData = async () => {
-            setLoading(true);
-            try {
-                const { data: beersData, error: beersError } = await supabase.from('beers').select('*, ratings(*), comments(*)');
-                if (beersError) throw beersError;
-                
-                if (beersData && beersData.length > 0) {
-                    setBeers(beersData as any);
-                } else {
-                    console.log("Nessuna birra trovata nel database, carico i dati di test.");
-                    setBeers(MOCK_BEERS);
-                }
+        // Fetch initial data for guests
+        fetchData();
 
-                const { data: breweriesData, error: breweriesError } = await supabase.from('breweries').select('*, ratings(*), comments(*)');
-                if (breweriesError) throw breweriesError;
-
-                if (breweriesData && breweriesData.length > 0) {
-                    setBreweries(breweriesData as any);
-                } else {
-                    console.log("Nessuna birreria trovata nel database, carico i dati di test.");
-                    setBreweries(MOCK_BREWERIES);
-                }
-
-            } catch (error: any) {
-                console.error('Error fetching initial data:', error.message);
-                showNotification("Errore nel caricamento dei dati, carico i dati di test.", "error");
-                setBeers(MOCK_BEERS);
-                setBreweries(MOCK_BREWERIES);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-
-        fetchInitialData();
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        // Listen for authentication changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+          async (event: AuthChangeEvent, session: Session | null) => {
             setUser(session?.user ?? null);
-        });
+            
+            // If user signs in, reload all data with their new permissions
+            if (event === 'SIGNED_IN') {
+              await fetchData();
+            }
+            // If user signs out, we can reload data for guest view or just clear user-specific data.
+            // Fetching again ensures RLS applies correctly for logged-out state.
+            if (event === 'SIGNED_OUT') {
+               await fetchData();
+            }
+          }
+        );
 
         return () => subscription.unsubscribe();
-    }, []);
+    }, [fetchData]);
 
      useEffect(() => {
         if (view === 'breweries' && !userLocation) {
@@ -117,37 +123,34 @@ const App: React.FC = () => {
                 }
             );
         }
-    }, [view, userLocation]);
+    }, [view, userLocation, showNotification]);
 
     // --- HANDLERS ---
     const handleLogin = useCallback(async (email: string, password: string): Promise<void> => {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-            showNotification(error.message, 'error');
-        } else {
-            setUser(data.user); // Explicitly set user state immediately
-            showNotification('Login effettuato con successo!');
-            setIsAuthModalOpen(false);
+            showNotification(`Login fallito: ${error.message}`, 'error');
+            throw error;
         }
-    }, []);
+        showNotification('Login effettuato con successo!');
+        setIsAuthModalOpen(false);
+    }, [showNotification]);
 
     const handleSignUp = useCallback(async (email: string, password: string): Promise<void> => {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) {
-            showNotification(error.message, 'error');
-        } else {
-            setUser(data.user); // Set user state immediately (might be null until confirmation)
-            showNotification('Registrazione completata! Controlla la tua email per la conferma.', 'success');
-            setIsAuthModalOpen(false);
+            showNotification(`Registrazione fallita: ${error.message}`, 'error');
+            throw error;
         }
-    }, []);
+        showNotification('Registrazione completata! Controlla la tua email per la conferma.', 'success');
+        setIsAuthModalOpen(false);
+    }, [showNotification]);
 
     const handleLogout = useCallback(async () => {
         await supabase.auth.signOut();
-        setUser(null);
         setIsUserProfileModalOpen(false);
         showNotification('Logout effettuato.', 'success');
-    }, []);
+    }, [showNotification]);
 
     const handleAddBeer = useCallback(async (postData: Omit<BeerPost, 'id' | 'ratings' | 'comments' | 'created_at' | 'user_id'>, imageFile: File | null) => {
         if (!user || !imageFile) {
@@ -177,7 +180,7 @@ const App: React.FC = () => {
         setBeers(currentBeers => [newCompletePost, ...currentBeers]);
         setIsNewBeerModalOpen(false);
         showNotification('Nuova birra aggiunta!', 'success');
-    }, [user]);
+    }, [user, showNotification]);
     
     const handleAddBrewery = useCallback(async (breweryData: Omit<BreweryPost, 'id' | 'ratings' | 'comments' | 'created_at' | 'user_id' | 'lat' | 'lng'>, imageFile: File) => {
         if (!user || !imageFile) {
@@ -213,7 +216,7 @@ const App: React.FC = () => {
         setBreweries(currentBreweries => [newCompleteBrewery, ...currentBreweries]);
         setIsNewBreweryModalOpen(false);
         showNotification('Nuova birreria aggiunta!', 'success');
-    }, [user]);
+    }, [user, showNotification]);
 
     const handleAddComment = useCallback(async (postId: number, commentText: string, targetView: 'beers' | 'breweries') => {
         if (!user) return;
@@ -225,7 +228,7 @@ const App: React.FC = () => {
         stateUpdater(prev => prev.map(p => p.id === postId ? { ...p, comments: [insertedComment as any, ...p.comments] } : p));
         if (targetView === 'beers') setSelectedBeer(prev => prev && { ...prev, comments: [insertedComment as any, ...prev.comments] });
         else setSelectedBrewery(prev => prev && { ...prev, comments: [insertedComment as any, ...prev.comments] });
-    }, [user]);
+    }, [user, showNotification]);
 
     const handleRate = useCallback(async (postId: number, ratingValue: number, targetView: 'beers' | 'breweries') => {
         if (!user) return;
@@ -254,10 +257,9 @@ const App: React.FC = () => {
             setBreweries(prev => prev.map(p => updateItemState(p) as BreweryPost));
             setSelectedBrewery(prev => prev ? updateItemState(prev) as BreweryPost : null);
         }
-    }, [user]);
+    }, [user, showNotification]);
     
     const handleDeletePost = useCallback(async (postId: number, postView: 'beers' | 'breweries', imageUrl: string) => {
-        // Find the post to check ownership
         const post = postView === 'beers' ? beers.find(b => b.id === postId) : breweries.find(b => b.id === postId);
         
         if (!user || (!isAdmin && user.id !== post?.user_id)) {
@@ -265,29 +267,21 @@ const App: React.FC = () => {
             return;
         }
 
-        // 1. Delete Image from Storage
         try {
             const urlParts = imageUrl.split('/');
             const filePath = urlParts.slice(urlParts.indexOf('posts-images') + 1).join('/');
-            
             if (filePath) {
-                const { error: storageError } = await supabase.storage.from('posts-images').remove([filePath]);
-                if (storageError) {
-                    // Log error but proceed to delete DB record, as it might be an old/invalid link
-                    console.error("Could not delete image, maybe it was already removed:", storageError.message);
-                }
+                await supabase.storage.from('posts-images').remove([filePath]);
             }
         } catch (e) {
-            console.error("Error parsing image URL for deletion:", e);
+            console.error("Error parsing/deleting image from storage:", e);
         }
 
-        // 2. Delete Post from Database
         const { error: dbError } = await supabase.from(postView).delete().match({ id: postId });
         if (dbError) {
             return showNotification(`Errore durante l'eliminazione: ${dbError.message}`, 'error');
         }
 
-        // 3. Update local state
         if (postView === 'beers') {
             setBeers(current => current.filter(p => p.id !== postId));
             setSelectedBeer(null);
@@ -298,7 +292,7 @@ const App: React.FC = () => {
         
         setIsUserProfileModalOpen(false);
         showNotification('Post eliminato con successo.', 'success');
-    }, [user, isAdmin, beers, breweries]);
+    }, [user, isAdmin, beers, breweries, showNotification]);
 
     const handleShareClick = (post: BeerPost | BreweryPost, event: React.MouseEvent) => {
         event.stopPropagation();
@@ -306,9 +300,7 @@ const App: React.FC = () => {
         setSharePopover({ visible: true, x: rect.left, y: rect.bottom + window.scrollY, post: post });
     };
 
-    // Fix: Changed String(...) to .toString() to allow TypeScript to correctly infer the type as a string before calling .toLowerCase(). This resolves the error where 'toLowerCase' was called on an 'unknown' type.
     const filteredBeers = useMemo(() => beers.filter(beer => Object.entries(filters).every(([key, value]) => value ? (beer[key as keyof BeerPost] ?? '').toString().toLowerCase().includes(value.toLowerCase()) : true)), [beers, filters]);
-    // Fix: Changed String(...) to .toString() to allow TypeScript to correctly infer the type as a string before calling .toLowerCase(). This resolves the error where 'toLowerCase' was called on an 'unknown' type.
     const filteredBreweries = useMemo(() => breweries.filter(brewery => Object.entries(filters).every(([key, value]) => value ? (brewery[key as keyof BreweryPost] ?? '').toString().toLowerCase().includes(value.toLowerCase()) : true)), [breweries, filters]);
     
     const searchFields = view === 'beers'
